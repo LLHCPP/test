@@ -12,7 +12,7 @@
 #include <thread>
 #include <functional>
 #include <stdexcept>
-
+#define  THREADPOOL_MAX_NUM 16
 class ThreadPool {
 private:
     using Task = std::function<void()>;
@@ -21,7 +21,7 @@ private:
     std::mutex MyLock;//互斥锁
     std::condition_variable ConLock;//条件锁
     std::atomic<bool> Running{true};//运行状态
-    std::atomic<uint16_t> MoTaskNum{0};
+    std::atomic<uint16_t> NoTaskNum{0};
 public:
     explicit ThreadPool(uint16_t);
 
@@ -37,7 +37,7 @@ public:
     auto commit(F &&f, Args &&... args) -> std::future<decltype(f(args...))>;
 };
 
-ThreadPool::ThreadPool(uint16_t size = 1) {
+ThreadPool::ThreadPool(uint16_t size = 2) {
     this->addThread(size);
 };
 
@@ -53,7 +53,7 @@ int ThreadPool::CountThreadNum() {
     return 0;
 }
 
-void ThreadPool::addThread(uint16_t) {
+void ThreadPool::addThread(uint16_t size) {
 
 }
 
@@ -62,7 +62,18 @@ auto ThreadPool::commit(F &&f, Args &&... args) -> std::future<decltype(f(args..
     if (!Running) {
         throw std::runtime_error("commit on ThreadPool is stopped.");
     }
-    using tempTask = decltype(f(args...));
-
+    using RetType = decltype(f(args...));
+    auto temptask = make_shared<std::packaged_task<RetType()>>(
+            std::bind(std::forward<F>(f), std::forward<Args>(args)...));
+    std::future<RetType> future==temptask->get_future;
+    std::lock_guard<mutex> lock(MyLock);
+    MyPool.emplace([temptask]() {
+        (*temptask)();
+    });
+    if (NoTaskNum < 1 && MyPool.size() < THREADPOOL_MAX_NUM) {
+        addThread(1);
+    }
+    ConLock.notify_one();
+    return future;
 };
 #endif //TEST_THREADPOOL_H
