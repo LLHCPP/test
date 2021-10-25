@@ -36,25 +36,39 @@ public:
     template<typename F, typename...Args>
     auto commit(F &&f, Args &&... args) -> std::future<decltype(f(args...))>;
 };
-
 ThreadPool::ThreadPool(uint16_t size = 2) {
     this->addThread(size);
 };
-
 ThreadPool::~ThreadPool() {
 
 }
-
 int ThreadPool::FreeThreadNum() {
-
+    return NoTaskNum;
 }
-
 int ThreadPool::CountThreadNum() {
-    return 0;
+    return MyPool.size();
 }
 
 void ThreadPool::addThread(uint16_t size) {
-
+    for (; MyPool.size() <= THREADPOOL_MAX_NUM && size > 0; --size) {
+        MyPool.emplace_back([this]() {
+            while (Running) {
+                std::unique_lock<mutex> templock(MyLock);
+                ConLock.wait(templock, [thus]() {
+                    return !Running || !MyPool.empty();
+                });
+                if (!Running && MyPool.empty()) {
+                    return;
+                }
+                Task task(std::move(MyTaskQueue.front()));
+                MyPool.pop();
+            }
+            --NoTaskNum;
+            task();
+            ++NoTaskNum;
+        });
+        ++NoTaskNum();
+    }
 }
 
 template<typename F, typename... Args>
