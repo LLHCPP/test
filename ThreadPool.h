@@ -40,7 +40,13 @@ ThreadPool::ThreadPool(uint16_t size = 2) {
     this->addThread(size);
 };
 ThreadPool::~ThreadPool() {
-
+    Running = false;
+    ConLock.notify_all();
+    for (std::thread &th: MyPool) {
+        if (th.joinable()) {
+            th.join();
+        }
+    }
 }
 int ThreadPool::FreeThreadNum() {
     return NoTaskNum;
