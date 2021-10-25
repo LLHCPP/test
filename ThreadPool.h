@@ -12,88 +12,94 @@
 #include <thread>
 #include <functional>
 #include <stdexcept>
+#include<memory>
 #define  THREADPOOL_MAX_NUM 16
+using namespace std;
+
 class ThreadPool {
 private:
-    using Task = std::function<void()>;
-    std::vector<std::thread> MyPool;//线程池
-    std::queue<Task> MyTaskQueue;//任务队列
-    std::mutex MyLock;//互斥锁
-    std::condition_variable ConLock;//条件锁
-    std::atomic<bool> Running{true};//运行状态
-    std::atomic<uint16_t> NoTaskNum{0};
+    using Task = function<void()>;
+    vector<thread> MyPool;//线程池
+    queue<Task> MyTaskQueue;//任务队列
+    mutex MyLock;//互斥锁
+    condition_variable ConLock;//条件锁
+    atomic<bool> Running{true};//运行状态
+    atomic<uint16_t> NoTaskNum{0};
 public:
-    explicit ThreadPool(uint16_t);
+    explicit ThreadPool(uint16_t size = 2);
 
     ~ThreadPool();
 
-    int FreeThreadNum();
+    uint16_t FreeThreadNum();
 
-    int CountThreadNum();
+    uint32_t CountThreadNum();
 
-    void addThread(uint16_t);
+    void addThread(uint16_t size);
 
     template<typename F, typename...Args>
-    auto commit(F &&f, Args &&... args) -> std::future<decltype(f(args...))>;
+    auto commit(F &&f, Args &&... args) -> future<decltype(f(args...))> {
+        using RetType = decltype(f(args...)); // typename std::result_of<F(Args...)>::type, 函数 f 的返回值类型
+        auto task = make_shared<packaged_task<RetType()>>(
+                bind(forward<F>(f), forward<Args>(args)...)
+        ); // 把函数入口及参数,打包(绑定)
+        future<RetType> future = task->get_future();
+        {    // 添加任务到队列
+            lock_guard<std::mutex> lock{MyLock};//对当前块的语句加锁  lock_guard 是 mutex 的 stack 封装类，构造的时候 lock()，析构的时候 unlock()
+            MyTaskQueue.emplace([task]() { // push(Task{...}) 放到队列后面
+                (*task)();
+            });
+        }
+
+        if (NoTaskNum < 1 && MyPool.size() < THREADPOOL_MAX_NUM) {
+            addThread(1);
+        }
+        ConLock.notify_one(); // 唤醒一个线程执行
+        return future;
+    }
 };
-ThreadPool::ThreadPool(uint16_t size = 2) {
+
+ThreadPool::ThreadPool(uint16_t size) {
     this->addThread(size);
-};
+}
+
 ThreadPool::~ThreadPool() {
     Running = false;
     ConLock.notify_all();
-    for (std::thread &th: MyPool) {
+    for (thread &th: MyPool) {
         if (th.joinable()) {
             th.join();
         }
     }
 }
-int ThreadPool::FreeThreadNum() {
+
+uint16_t ThreadPool::FreeThreadNum() {
     return NoTaskNum;
 }
-int ThreadPool::CountThreadNum() {
+
+uint32_t ThreadPool::CountThreadNum() {
     return MyPool.size();
 }
 
 void ThreadPool::addThread(uint16_t size) {
-    for (; MyPool.size() <= THREADPOOL_MAX_NUM && size > 0; --size) {
+    for (; MyPool.size() < THREADPOOL_MAX_NUM && size > 0; --size) {
         MyPool.emplace_back([this]() {
             while (Running) {
-                std::unique_lock<mutex> templock(MyLock);
-                ConLock.wait(templock, [thus]() {
-                    return !Running || !MyPool.empty();
+                unique_lock<mutex> templock(MyLock);
+                ConLock.wait(templock, [this]() {
+                    return !Running || !MyTaskQueue.empty();
                 });
-                if (!Running && MyPool.empty()) {
+                if (!Running && MyTaskQueue.empty()) {
                     return;
                 }
-                Task task(std::move(MyTaskQueue.front()));
-                MyPool.pop();
+                Task task(move(MyTaskQueue.front()));
+                MyTaskQueue.pop();
+                templock.unlock();
+                --NoTaskNum;
+                task();
+                ++NoTaskNum;
             }
-            --NoTaskNum;
-            task();
-            ++NoTaskNum;
         });
-        ++NoTaskNum();
+        ++NoTaskNum;
     }
 }
-
-template<typename F, typename... Args>
-auto ThreadPool::commit(F &&f, Args &&... args) -> std::future<decltype(f(args...))> {
-    if (!Running) {
-        throw std::runtime_error("commit on ThreadPool is stopped.");
-    }
-    using RetType = decltype(f(args...));
-    auto temptask = make_shared<std::packaged_task<RetType()>>(
-            std::bind(std::forward<F>(f), std::forward<Args>(args)...));
-    std::future<RetType> future==temptask->get_future;
-    std::lock_guard<mutex> lock(MyLock);
-    MyPool.emplace([temptask]() {
-        (*temptask)();
-    });
-    if (NoTaskNum < 1 && MyPool.size() < THREADPOOL_MAX_NUM) {
-        addThread(1);
-    }
-    ConLock.notify_one();
-    return future;
-};
 #endif //TEST_THREADPOOL_H
