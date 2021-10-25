@@ -15,7 +15,7 @@
 
 class ThreadPool {
 private:
-    using Task = function<void()>;
+    using Task = std::function<void()>;
     std::vector<std::thread> MyPool;//线程池
     std::queue<Task> MyTaskQueue;//任务队列
     std::mutex MyLock;//互斥锁
@@ -38,7 +38,7 @@ public:
 };
 
 ThreadPool::ThreadPool(uint16_t size = 1) {
-
+    this->addThread(size);
 };
 
 ThreadPool::~ThreadPool() {
@@ -59,6 +59,10 @@ void ThreadPool::addThread(uint16_t) {
 
 template<typename F, typename... Args>
 auto ThreadPool::commit(F &&f, Args &&... args) -> std::future<decltype(f(args...))> {
-    return nullptr;
+    if (!Running) {
+        throw std::runtime_error("commit on ThreadPool is stopped.");
+    }
+    using tempTask = decltype(f(args...));
+
 };
 #endif //TEST_THREADPOOL_H
