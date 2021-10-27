@@ -15,7 +15,6 @@
 #include<memory>
 #define  THREADPOOL_MAX_NUM 16
 using namespace std;
-
 class ThreadPool {
 private:
     using Task = function<void()>;
